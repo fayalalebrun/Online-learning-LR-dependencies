@@ -1,8 +1,10 @@
 """Implementation of basic benchmark datasets used in S4 experiments: MNIST, CIFAR10 and Speech Commands."""
 import numpy as np
 import torch
+from torch.utils.data import TensorDataset
 import torchvision
 from einops.layers.torch import Rearrange
+from scipy import signal
 
 from .base import (
     default_data_path,
@@ -12,6 +14,120 @@ from .base import (
 )
 from ..utils import permutations
 
+class Wave(SequenceDataset):
+    _name_ = "wave"
+    d_input = 1
+    d_output = 3
+    l_output = 0
+    L = 100
+    
+    @property
+    def init_defaults(self):
+        return {
+            "permute": True,
+            "val_split": 0.1,
+            "seed": 42,  # For train/val split
+        }
+
+    def setup(self):
+        samples_per_wave = 1000
+        freq = 5
+        
+        np.random.seed(self.seed)
+        offsets = np.linspace(0, 1, num=samples_per_wave)
+
+        t = np.linspace(0, 1, num=self.L) * freq
+        
+
+        ts = t.reshape((1, -1)) + offsets.reshape((-1, 1)) 
+        
+        sines = np.sin(ts) + np.random.rand(*ts.shape) / 100
+        sines_labels = np.repeat(0, samples_per_wave)
+        
+        squares = signal.square(ts) + np.random.rand(*ts.shape) / 100
+        squares_labels = np.repeat(1, samples_per_wave)
+
+        triangles = signal.sawtooth(ts) + np.random.rand(*ts.shape) / 100
+        triangles_labels = np.repeat(2, samples_per_wave)
+
+        # import matplotlib.pyplot as plt
+        # plt.plot(ts[0], triangles[0])
+        # plt.show()
+
+        data = np.concatenate((sines, squares, triangles))
+        labels = np.concatenate((sines_labels, squares_labels, triangles_labels))
+
+        # Shuffle the data around
+        p = np.random.permutation(data.shape[0])
+        data = torch.from_numpy(data[p])
+        labels = torch.from_numpy(labels[p])
+
+        n = int((data.shape[0] * 9)/10)
+        train_x, test_x = data[:n,:], data[n:,:]
+        train_y, test_y = labels[:n], labels[n:]
+
+        self.dataset_train = TensorDataset(train_x, train_y)
+        self.dataset_test = TensorDataset(test_x, test_y)
+
+        self.split_train_val(self.val_split)
+
+
+class Zeroes(SequenceDataset):
+    _name_ = "zeroes"
+    d_input = 1
+    d_output = 2
+    l_output = 0
+    L = 10
+    
+    @property
+    def init_defaults(self):
+        return {
+            "permute": True,
+            "val_split": 0.1,
+            "seed": 42,  # For train/val split
+        }
+
+    def setup(self):
+        samples = 20
+        
+        np.random.seed(self.seed)
+
+        zero = np.ones(self.L)
+        zero[0] = 0
+        zeroes = np.array([np.random.permutation(zero) for _ in range(samples)])
+        zeroes_labels = np.repeat(0, samples)
+        
+        ones = np.tile(np.ones(self.L), (samples, 1))
+        ones_labels = np.repeat(1, samples)
+
+        # import matplotlib.pyplot as plt
+        # plt.plot(ts[0], triangles[0])
+        # plt.show()
+
+        data = np.concatenate((zeroes, ones))
+        labels = np.concatenate((zeroes_labels, ones_labels))
+
+        # Shuffle the data around
+        p = np.random.permutation(data.shape[0])
+        data = data[p]
+        labels = labels[p]
+
+        print(data)
+        print(labels)
+
+        data = torch.from_numpy(data)
+        labels = torch.from_numpy(labels)
+
+        n = int((data.shape[0] * 9)/10)
+        train_x, test_x = data[:n,:], data[n:,:]
+        train_y, test_y = labels[:n], labels[n:]
+
+        self.dataset_train = TensorDataset(train_x, train_y)
+        self.dataset_test = TensorDataset(test_x, test_y)
+
+        self.split_train_val(self.val_split)        
+
+        
 
 class MNIST(SequenceDataset):
     _name_ = "mnist"

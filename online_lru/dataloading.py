@@ -452,6 +452,112 @@ def create_cifar_classification_dataset(
     )
 
 
+def create_wave_classification_dataset(
+    cache_dir: Union[str, Path] = DEFAULT_CACHE_DIR_ROOT, seed: int = 42, bsz: int = 128
+) -> ReturnType:
+    """
+    See abstract template.
+
+    Cifar is quick to download and is automatically cached.
+    """
+
+    print("[*] Generating MNIST Classification Dataset")
+    from online_lru.dataloaders.basic import Wave
+
+    name = "wave"
+
+    kwargs = {"permute": False}
+
+    dataset_obj = Wave(name, data_dir=cache_dir, **kwargs)
+    dataset_obj.setup()
+
+    trn_loader = make_data_loader(dataset_obj.dataset_train, dataset_obj, seed=seed, batch_size=bsz)
+    val_loader = make_data_loader(
+        dataset_obj.dataset_val,
+        dataset_obj,
+        seed=seed,
+        batch_size=bsz,
+        drop_last=False,
+        shuffle=False,
+    )
+    tst_loader = make_data_loader(
+        dataset_obj.dataset_test,
+        dataset_obj,
+        seed=seed,
+        batch_size=bsz,
+        drop_last=False,
+        shuffle=False,
+    )
+
+    N_CLASSES = dataset_obj.d_output
+    SEQ_LENGTH = dataset_obj.L
+    IN_DIM = dataset_obj.d_input
+    TRAIN_SIZE = len(dataset_obj.dataset_train)
+    aux_loaders = {}
+    return (
+        trn_loader,
+        val_loader,
+        tst_loader,
+        aux_loaders,
+        N_CLASSES,
+        SEQ_LENGTH,
+        IN_DIM,
+        TRAIN_SIZE,
+    )
+
+def create_zeroes_classification_dataset(
+    cache_dir: Union[str, Path] = DEFAULT_CACHE_DIR_ROOT, seed: int = 42, bsz: int = 128
+) -> ReturnType:
+    """
+    See abstract template.
+
+    Cifar is quick to download and is automatically cached.
+    """
+
+    print("[*] Generating MNIST Classification Dataset")
+    from online_lru.dataloaders.basic import Zeroes
+
+    name = "zeroes"
+
+    kwargs = {"permute": False}
+
+    dataset_obj = Zeroes(name, data_dir=cache_dir, **kwargs)
+    dataset_obj.setup()
+
+    trn_loader = make_data_loader(dataset_obj.dataset_train, dataset_obj, seed=seed, batch_size=bsz)
+    val_loader = make_data_loader(
+        dataset_obj.dataset_val,
+        dataset_obj,
+        seed=seed,
+        batch_size=bsz,
+        drop_last=False,
+        shuffle=False,
+    )
+    tst_loader = make_data_loader(
+        dataset_obj.dataset_test,
+        dataset_obj,
+        seed=seed,
+        batch_size=bsz,
+        drop_last=False,
+        shuffle=False,
+    )
+
+    N_CLASSES = dataset_obj.d_output
+    SEQ_LENGTH = dataset_obj.L
+    IN_DIM = dataset_obj.d_input
+    TRAIN_SIZE = len(dataset_obj.dataset_train)
+    aux_loaders = {}
+    return (
+        trn_loader,
+        val_loader,
+        tst_loader,
+        aux_loaders,
+        N_CLASSES,
+        SEQ_LENGTH,
+        IN_DIM,
+        TRAIN_SIZE,
+    )
+
 def create_mnist_classification_dataset(
     cache_dir: Union[str, Path] = DEFAULT_CACHE_DIR_ROOT, seed: int = 42, bsz: int = 128
 ) -> ReturnType:
@@ -651,6 +757,8 @@ Datasets = {
     "mnist-classification": create_mnist_classification_dataset,
     "pmnist-classification": create_pmnist_classification_dataset,
     "cifar-classification": create_cifar_classification_dataset,
+    "wave-classification": create_wave_classification_dataset,
+    "zeroes-classification": create_zeroes_classification_dataset,
     # LRA.
     "imdb-classification": create_lra_imdb_classification_dataset,
     "listops-classification": create_lra_listops_classification_dataset,
