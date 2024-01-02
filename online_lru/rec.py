@@ -1,5 +1,6 @@
 from functools import partial
 import jax
+from jax._src import custom_api_util
 import jax.numpy as jnp
 from flax import linen as nn
 from .rec_init import matrix_init, truncated_normal_matrix_init, theta_init, nu_init, gamma_log_init
@@ -67,73 +68,73 @@ class LRU(nn.Module):
             return jnp.exp(self.gamma_log)
         else:
             return jnp.ones((self.d_hidden,))
-
+ 
     def get_B(self):
         """
         Get input to hidden matrix B.
         """
         return self.B_re + 1j * self.B_im
-
+ 
     def get_B_norm(self):
         """
         Get modulated input to hidden matrix gamma B.
         """
         return self.get_B() * jnp.expand_dims(self.get_diag_gamma(), axis=-1)
-
+ 
     def to_output(self, inputs, hidden_states):
         """
         Compute output given inputs and hidden states.
-
+ 
         Args:
             inputs array[T, H].
             hidden_states array[T, N].
         """
-        C = self.C_re + 1j * self.C_im
-        D = self.D
-        y = jax.vmap(lambda x, u: (C @ x).real + D * u)(hidden_states, inputs)
+        y = jax.vmap(lambda x, u: x.real + u)(hidden_states, inputs)
         return y
-
+ 
     def get_hidden_states(self, inputs):
         """
         Compute the hidden states corresponding to inputs
-
+ 
         Return:
             hidden_states array[T, N]
         """
         # Materializing the diagonal of Lambda and projections
         diag_lambda = self.get_diag_lambda()
         B_norm = self.get_B_norm()
-
+ 
         # Running the LRU + output projection
         # For details on parallel scan, check discussion in Smith et al (2022).
         Lambda_elements = jnp.repeat(diag_lambda[None, ...], inputs.shape[0], axis=0)
         Bu_elements = jax.vmap(lambda u: B_norm @ u)(inputs)
         elements = (Lambda_elements, Bu_elements)
-        if self.training_mode == "bptt":
-            _, hidden_states = jax.lax.associative_scan(binary_operator_diag, elements)
-        else:
-            _, hidden_states = jax.lax.associative_scan(binary_operator_diag_spatial, elements)
-
+        # if self.training_mode == "bptt": NOTE: no need for this distinction anymore
+        _, hidden_states = jax.lax.associative_scan(binary_operator_diag, elements)
+        # else:
+        #     _, hidden_states = jax.lax.associative_scan(binary_operator_diag_spatial, elements)
+ 
         return hidden_states
-
+ 
     def setup(self):
         # Check that desired approximation is handled
         if self.training_mode == "online_snap1":
             raise NotImplementedError("SnAp-1 not implemented for LRU")
         assert self.training_mode in [
-            "bptt",
+            # "bptt", TODO later: make sure that it works
             "online_full",
-            "online_full_rec",
-            "online_full_rec_simpleB",
-            "online_snap1",  # same as online_full
-            "online_spatial",
-            "online_1truncated",
-            "online_reservoir",
+            # We don't need all these things
+            # "online_full_rec",
+            # "online_full_rec_simpleB",
+            # "online_snap1",  # same as online_full
+            # "online_spatial",
+            # "online_1truncated",
+            # "online_reservoir",
         ]
-        self.online = "online" in self.training_mode  # whether we compute the gradient online
-        if self.online:
-            self.approximation_type = self.training_mode[7:]
-
+        # NOTE: I don't think this is needed for now
+        # self.online = "online" in self.training_mode  # whether we compute the gradient online
+        # if self.online:
+        #     self.approximation_type = self.training_mode[7:]
+ 
         # NOTE if exp_param is true, self.theta and self.nu actually represent the log of nu and
         # theta lambda is initialized uniformly in complex plane
         self.theta = self.param(
@@ -150,7 +151,7 @@ class LRU(nn.Module):
             self.gamma_log = self.param(
                 "gamma_log", partial(gamma_log_init, log=self.exp_param), (self.nu, self.theta)
             )
-
+ 
         # Glorot initialized Input/Output projection matrices
         self.B_re = self.param(
             "B_re",
@@ -162,18 +163,10 @@ class LRU(nn.Module):
             partial(matrix_init, normalization=jnp.sqrt(2 * self.d_model)),
             (self.d_hidden, self.d_model),
         )
-        self.C_re = self.param(
-            "C_re",
-            partial(matrix_init, normalization=jnp.sqrt(self.d_hidden)),
-            (self.d_model, self.d_hidden),
-        )
-        self.C_im = self.param(
-            "C_im",
-            partial(matrix_init, normalization=jnp.sqrt(self.d_hidden)),
-            (self.d_model, self.d_hidden),
-        )
-        self.D = self.param("D", matrix_init, (self.d_model,))
-
+ 
+        """ NOTE: all of that is not needed anymore, we don't need to keep them explicitely in memory
+        as it will be taken care by automatic differentiation (more precisely through the ouptput of
+        the fwd function)
         # Internal variables of the model needed for updating the gradient
         if self.online and self.approximation_type not in ["spatial", "reservoir"]:
             self.pert_hidden_states = self.variable(
@@ -182,86 +175,156 @@ class LRU(nn.Module):
                 partial(jnp.zeros, dtype=jnp.complex64),
                 (self.seq_length, self.d_hidden),
             )
-
+ 
             self.traces_gamma = self.variable(
                 "traces", "gamma", jnp.zeros, (self.seq_length, self.d_hidden)
             )
             self.traces_lambda = self.variable(
                 "traces", "lambda", jnp.zeros, (self.seq_length, self.d_hidden)
             )
-
+ 
             if self.approximation_type in ["full", "snap1", "full_rec_simpleB"]:
                 self.traces_B = self.variable(
                     "traces", "B", jnp.zeros, (self.seq_length, self.d_hidden, self.d_model)
                 )
-
+            """
+ 
     def __call__(self, inputs):
         """
         Forward pass. If in training mode, additionally computes the eligibility traces that
         will be needed to compute the gradient estimate in backward.
         """
-        # Compute hidden states and outputs
-        hidden_states = self.get_hidden_states(inputs)
-        if self.online and self.approximation_type not in ["spatial", "reservoir"]:
-            # To obtain the spatially backpropagated errors sent to hidden_states
-            # NOTE: only works if pert_hidden_states is equal to 0
-            hidden_states += self.pert_hidden_states.value
-        output = self.to_output(inputs, hidden_states)
-
-        # Compute and update traces if needed (i.e. if we are in online training mode)
-        if self.online and self.approximation_type not in ["spatial", "reservoir"]:
-            Bu_elements = jax.vmap(lambda u: self.get_B() @ u)(inputs)
-            # Update traces for B, lambda and gamma
-            if self.approximation_type in ["1truncated"]:
-                self.traces_lambda.value = hidden_states[:-1]
-                self.traces_gamma.value = Bu_elements
-            elif self.approximation_type in ["full", "full_rec", "full_rec_simpleB", "snap1"]:
-                Lambda_elements = jnp.repeat(
-                    self.get_diag_lambda()[None, ...], inputs.shape[0], axis=0
-                )
-                # Update for trace lambda
-                _, self.traces_lambda.value = jax.lax.associative_scan(
-                    binary_operator_diag,
-                    (Lambda_elements[:-1], hidden_states[:-1]),
-                )
-                # Update for trace gamma
-                Bu_elements_gamma = Bu_elements
-                _, self.traces_gamma.value = jax.lax.associative_scan(
-                    binary_operator_diag, (Lambda_elements, Bu_elements_gamma)
-                )
-
+ 
+        # f is the function that is used for inference (no learning), so no need to compute traces there
+        def f(self, inputs):
+            hidden_states = self.get_hidden_states(inputs)
+            return self.to_output(inputs, hidden_states)
+ 
+        def fwd(self, inputs):
+            # GOAL: this must return something with the same signature as nn.vjp, that is
+            # the output of the function, and something that will be given to the backward pass
+            # To compute the gradient, we only need the traces and the backpropagated error, so the
+            # output only has to contain traces.
+            # NOTE: usually you need the vjp function there, but given that we are overwritting
+            # everything here, it should not be needed
+            hidden_states = self.get_hidden_states(inputs)
+ 
+            """
+            NOTE: No need to compute perturbations as we know the error in the backward pass!
+            We can get rid of that.
+            if self.online and self.approximation_type not in ["spatial", "reservoir"]:
+                # To obtain the spatially backpropagated errors sent to hidden_states
+                # NOTE: only works if pert_hidden_states is equal to 0
+                hidden_states += self.pert_hidden_states.value
+            """
+            # Bu_elements = jax.vmap(lambda u: self.get_B() @ u)(inputs)  # TODO: Use B norm here?
+                # Update traces for B, lambda and gamma
+                #if self.approximation_type in ["1truncated"]:
+                #    self.traces_lambda.value = hidden_states[:-1]
+                #    self.traces_gamma.value = Bu_elements
+                #elif self.approximation_type in ["full", "full_rec", "full_rec_simpleB", "snap1"]:
+            Lambda_elements = jnp.repeat(
+                self.get_diag_lambda()[None, ...], inputs.shape[0], axis=0
+            )
+            traces = {}  # To store the traces and send to the backward function
+            # Update for trace lambda
+            _, traces["lambda"] = jax.lax.associative_scan(
+                binary_operator_diag,
+                (Lambda_elements[:-1], hidden_states[:-1]),
+            )
+ 
+            # Update for trace gamma
+            # if self.use_gamma:
+            #     Bu_elements_gamma = Bu_elements
+            #     _, traces["gamma"] = jax.lax.associative_scan(
+            #         binary_operator_diag, (Lambda_elements, Bu_elements_gamma)
+            #     )
+ 
             # Update trace for B
-            if self.approximation_type in ["full", "snap1"]:
-                full_Lambda_elements = jnp.repeat(
-                    jnp.expand_dims(self.get_diag_lambda(), axis=-1)[None, ...],
-                    inputs.shape[0],
-                    axis=0,
-                )  # same as left multiplying by diag(lambda), but same shape as B (to allow for
-                #    element-wise multiplication in the associative scan)
-                gammau_elements = jax.vmap(lambda u: jnp.outer(self.get_diag_gamma(), u))(
-                    inputs
-                ).astype(jnp.complex64)
-                _, self.traces_B.value = jax.lax.associative_scan(
-                    binary_operator_diag,
-                    (full_Lambda_elements, gammau_elements + 0j),
+            full_Lambda_elements = jnp.repeat(
+                jnp.expand_dims(self.get_diag_lambda(), axis=-1)[None, ...],
+                inputs.shape[0],
+                axis=0,
+            )  # same as left multiplying by diag(lambda), but same shape as B (to allow for
+            #    element-wise multiplication in the associative scan)
+            gammau_elements = jax.vmap(lambda u: jnp.outer(self.get_diag_gamma(), u))(
+                inputs
+            ).astype(jnp.complex64)
+            _, traces["B"] = jax.lax.associative_scan(
+                binary_operator_diag,
+                (full_Lambda_elements, gammau_elements + 0j),
+            )
+            
+            # Return output, traces (which will be sent to the backward pass)
+            return self.to_output(inputs, hidden_states), traces
+ 
+        # def fwd(self, inputs):
+        #    return nn.vjp(f, self, inputs)
+ 
+        # ERROR: This backward pass does not compute the parameters update!
+        # This function needs to do what update_gradients is doing
+        # def bwd(vjp_fn, y_t):
+        #     params_t, *inputs_t = vjp_fn(y_t)
+        #     return (params_t, *inputs_t)
+        def bwd(traces, delta):            
+            # First, we compute the derivative for the input. We just use spatial backprop here.
+            # NOTE: delta_x = delta (residual stream) + B_re.T delta
+            # NOTE: there are probably some dimension issues with the message below
+            delta_x = delta \
+                + (self.B_re @ delta.transpose()).transpose() # derivative coming from (Bx).real = B.real x (as x is real)
+ 
+            # For the parameters, we reuse a similar code to update_gradients
+            delta_params = {}
+            # Grads for lambda
+            delta_lambda = jnp.sum(self.pert_hidden_states.value[1:] * self.traces_lambda.value, axis=0)
+            _, dl = jax.vjp(
+                lambda nu, theta: self.get_diag_lambda(nu=nu, theta=theta),
+                self.nu,
+                self.theta,
+            )
+            grad_nu, grad_theta = dl(delta_lambda)
+            delta_params["nu"] = grad_nu
+            delta_params["theta"] = grad_theta
+ 
+            # Grads for gamma if needed
+            if self.gamma_norm:
+                delta_gamma = jnp.sum(
+                    (delta * traces["gamma"]).real, axis=0  # NOTE: we can use delta instead of the perturbation
                 )
-            elif self.approximation_type in ["full_rec_simpleB"]:
-                self.traces_B.value = jax.vmap(lambda u: jnp.outer(self.get_diag_gamma(), u))(
-                    inputs
-                ).astype(jnp.complex64)
-        return output
+                # as dgamma/dgamma_log = exp(gamma_log) = gamma
+                delta_params["gamma_log"] = delta_gamma * self.get_diag_gamma()
+ 
+            # Grads for B
+            if self.approximation_type in ["snap1", "full", "full_rec_simpleB"]:
+                grad_B = jnp.sum(
+                    jax.vmap(lambda dx, trace: dx.reshape(-1, 1) * trace)(
+                        delta, traces["B"]
+                    ),
+                    axis=0,
+                )
+                delta_params["B_re"] = grad_B.real
+                delta_params["B_im"] = -grad_B.imag  # Comes from the use of Writtinger derivatives
+ 
+            return (delta_params, delta_x)  # derivative for the two inputs of f
+        
+        custom_f = nn.custom_vjp(fn=f, forward_fn=fwd, backward_fn=bwd)
+        # With this, we can just plug the module in a normal autograd pipeline (no need to use update_gradients anymore)
 
+        return  custom_f(self,inputs)
+ 
+    """
+    NOTE: no need to update gradients a posteriori, it will be done in the backward pass!
     def update_gradients(self, grad):
-        """
+        '''
         Eventually combine traces and perturbations to compute the (online) gradient.
-        """
+        '''
         if self.training_mode in ["bptt", "online_spatial", "online_reservoir"]:
             raise ValueError("Upgrade gradient should not be called for this training mode")
-
+ 
         # We need to change the gradients for lambda, gamma and B
         # The others are automatically computed with spatial backpropagation
         # NOTE: self.pert_hidden_states contains dL/dhidden_states
-
+ 
         # Grads for lambda
         delta_lambda = jnp.sum(self.pert_hidden_states.value[1:] * self.traces_lambda.value, axis=0)
         _, dl = jax.vjp(
@@ -293,6 +356,7 @@ class LRU(nn.Module):
             grad["B_im"] = -grad_B.imag  # Comes from the use of Writtinger derivatives
 
         return grad
+    """
 
 
 class RNN(nn.Module):
