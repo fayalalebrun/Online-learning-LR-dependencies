@@ -7,7 +7,7 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 base_params = {
-    "d_hidden": 10,
+    "d_hidden": 2,
     "d_model": 2,
     "seq_length": 100,
 }
@@ -59,7 +59,7 @@ def check_grad_all(grad_1, grad_2, to_check=None, **kwargs):
         for key in keys:
             val1 = val1[key]
             val2 = val2[key]
-        assert jnp.allclose(val1, val2, **kwargs), "Mismatch at %s" % path
+        assert jnp.allclose(val1, val2, **kwargs), "Mismatch at %s, %s != %s" % (path, val1, val2)
 
 
 def compute_grads(model, params_states, inputs, y, mask):

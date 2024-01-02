@@ -290,13 +290,7 @@ def state_to_paramsstates(state, init_states, model):
     params_states = {"params": state.params}
     autodiff_all = model.training_mode in ["bptt", "online_spatial", "online_reservoir"]
     autodiff_seq = model.rec_type != "LRU" and model.training_mode == "online_1truncated"
-    if not (autodiff_all or autodiff_seq):
-        params_states["traces"] = jax.tree_util.tree_map(
-            lambda s: jnp.zeros_like(s), init_states["traces"]
-        )
-        params_states["perturbations"] = jax.tree_util.tree_map(
-            lambda s: jnp.zeros_like(s), init_states["perturbations"]
-        )
+
     return params_states
 
 
@@ -532,28 +526,15 @@ def batched_average_mask(a, mask):
 
 
 def compute_grad(params_states, rng, inputs, labels, mask, model):
-    def _loss_fn(ps):
-        logits, mod_vars = model.apply(ps, inputs, rngs={"dropout": rng}, mutable=["traces"])
+    def _loss_fn(ps):    
+        logits = model.apply(ps, inputs, rngs={"dropout": rng})
         loss = loss_fn(logits, labels, mask)[0]
-        return loss, mod_vars
+        return loss
 
-    (loss, mod_vars), grad = jax.value_and_grad(_loss_fn, has_aux=True)(params_states)
-    autodiff_all = model.training_mode in ["bptt", "online_spatial", "online_reservoir"]
-    autodiff_seq = model.rec_type != "LRU" and model.training_mode == "online_1truncated"
-    if autodiff_all or autodiff_seq:
-        grad = grad["params"]
-    else:
-        params_states = {
-            "params": params_states["params"],
-            "traces": mod_vars["traces"],
-            "perturbations": grad["perturbations"],
-        }
-        grads_params = jax.tree_util.tree_map(
-            lambda s: jnp.repeat(s[None, :], inputs.shape[0], axis=0) / inputs.shape[0],
-            grad["params"],
-        )
-        grads = model.apply(params_states, grads_params, method=model.update_gradients)
-        grad = jax.tree_util.tree_map(lambda s: jnp.sum(s, axis=0), grads)
+    loss, grad = jax.value_and_grad(_loss_fn)(params_states)
+
+    grad = grad["params"]
+
     return loss, grad
 
 

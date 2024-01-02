@@ -12,7 +12,7 @@ from .train_helpers import (
 )
 from .dataloading import Datasets
 from .seq_model import BatchClassificationModel
-from .rec import init_layer
+from .rec import init_layer, LRU
 
 
 def train(args):
@@ -92,8 +92,9 @@ def train(args):
     # arguments specific to LRU or to RNN class
     additional_arguments = {}
     if args.layer_cls == "LRU":
-        additional_arguments["r_min"] = args.r_min
-        additional_arguments["r_max"] = args.r_max
+        ""
+        # additional_arguments["r_min"] = args.r_min
+        # additional_arguments["r_max"] = args.r_max
     if args.layer_cls == "RNN":
         additional_arguments["activation"] = args.rnn_activation_fn
         additional_arguments["scaling_hidden"] = args.rnn_scaling_hidden
@@ -101,17 +102,14 @@ def train(args):
         assert args.d_hidden == args.d_model
     rec_train = init_layer(
         layer_cls=args.layer_cls,
-        d_hidden=args.d_hidden,
-        d_model=args.d_model,
-        seq_length=seq_len,
+        lru_cls=LRU(dim=args.d_model),
         training_mode=args.training_mode,
         **additional_arguments,
     )
+
     rec_val = init_layer(
         layer_cls=args.layer_cls,
-        d_hidden=args.d_hidden,
-        d_model=args.d_model,
-        seq_length=seq_len,
+        lru_cls=LRU(dim=args.d_model),
         training_mode="bptt",  # bptt mode so rec does not keep in memory states and traces
         **additional_arguments,
     )
