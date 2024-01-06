@@ -1,15 +1,20 @@
+import subprocess
+
 import math
 from copy import deepcopy
 from functools import partial
 from typing import Tuple
 
 import jax
+import flax
 import jax.numpy as jnp
 import optax
 import wandb
 from flax.training import train_state
 from jax.nn import one_hot
 from tqdm import tqdm
+
+import flax.linen as nn
 
 
 from .log_helpers import format_metrics, get_grad_metrics, get_params_metrics, merge_metrics
@@ -99,6 +104,7 @@ def map_nested_fn(fn):
 
 def create_train_state(
     model,
+    bptt_model,
     rng,
     retrieval,
     in_dim=1,
@@ -127,7 +133,12 @@ def create_train_state(
         dummy_input = jnp.ones((bsz, seq_len, in_dim))
 
     init_rng, dropout_rng = jax.random.split(rng, num=2)
-    variables = model.init({"params": init_rng, "dropout": dropout_rng}, dummy_input)
+    # Since we want to use the same parameter initialization to compare BPTT and online, we initialize both and
+    # merge them together. Otherwise unused parameters will be optimized out.
+    from mergedeep import merge
+    variables = merge(model.init({"params": init_rng, "dropout": dropout_rng}, dummy_input), bptt_model.init({"params": init_rng, "dropout": dropout_rng}, dummy_input))
+
+    
 
     params = variables["params"]
     init_states = {
@@ -526,7 +537,7 @@ def batched_average_mask(a, mask):
 
 
 def compute_grad(params_states, rng, inputs, labels, mask, model):
-    def _loss_fn(ps):    
+    def _loss_fn(ps):
         logits = model.apply(ps, inputs, rngs={"dropout": rng})
         loss = loss_fn(logits, labels, mask)[0]
         return loss

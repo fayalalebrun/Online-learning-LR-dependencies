@@ -7,8 +7,8 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 base_params = {
-    "d_hidden": 2,
-    "d_model": 2,
+    "d_hidden": 5,
+    "d_model": 5,
     "seq_length": 100,
 }
 

@@ -32,6 +32,7 @@ class TestLRU(unittest.TestCase):
 
         params_states = {
             "params": {
+                "B_dfa": jnp.array([[-100.0]]),
                 "lru_cls": {
                     "B_re": jnp.array([[2.0]]),
                     "B_im": jnp.array([[2.0]]),
@@ -98,8 +99,14 @@ class TestLRU(unittest.TestCase):
         # dB = 85.75 - 42.875j
 
         # Compute gradient online
-        batched_lru = batched_LRU(lru_cls=LRU(dim=1), training_mode="online_full")
+        batched_lru = batched_LRU(lru_cls=LRU(dim=1), training_mode="online_full", final_output_dims=1)
 
+
+        grad, online_grad = compute_grads(batched_lru, params_states, inputs, y, mask)
+
+        check_grad_all(grad, online_grad, atol=1e-5)
+
+        batched_lru = batched_LRU(lru_cls=LRU(dim=1), training_mode="online_dfa", final_output_dims=1)
 
         grad, online_grad = compute_grads(batched_lru, params_states, inputs, y, mask)
 
@@ -107,7 +114,7 @@ class TestLRU(unittest.TestCase):
 
     def test_online_full(self):
         # Compute gradient online
-        batched_lru = batched_LRU(lru_cls=LRU(dim=base_params["d_model"]), training_mode="online_full")
+        batched_lru = batched_LRU(lru_cls=LRU(dim=base_params["d_model"]), training_mode="online_full", final_output_dims=base_params["d_model"])
         batched_lru.rec_type = "LRU"
         params_states = batched_lru.init({"params": jax.random.PRNGKey(0)}, inputs)
 

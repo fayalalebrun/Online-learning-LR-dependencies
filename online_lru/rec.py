@@ -1,6 +1,6 @@
 from functools import partial
 import jax
-from jax import random
+from jax import random, tree_structure
 import jax.numpy as jnp
 from flax import linen as nn, core
 from .rec_init import matrix_init, theta_init, nu_init, gamma_log_init
@@ -42,13 +42,17 @@ class LRU(nn.Module):
 
 class LRUOnline(nn.Module):
     lru_cls: LRU
+    final_output_dims: int # Final output dimensions of the overall model, used for DFA
     training_mode: str = "bptt"  # which learning algorithm will be used
+
 
     def setup(self):
         self.lru = self.lru_cls
+        self.B_dfa = self.param("B_dfa", nn.initializers.lecun_normal(),
+                       (self.lru.dim, self.final_output_dims))
 
     def __call__(self, inputs):
-        assert self.training_mode in ["bptt", "online_full"]
+        assert self.training_mode in ["bptt", "online_full", "online_dfa"]
 
         if self.training_mode == "bptt":
             return self.lru(inputs)
@@ -62,15 +66,25 @@ class LRUOnline(nn.Module):
                 return primals_out, (vjp_fun, backward_params)
 
             def backward(vjp_fun_ext, delta):
+
                 vjp_fun, backward_params = vjp_fun_ext
-                delta_params, delta_x, _ = vjp_fun(delta)  # compute params gradient with autodiff
-                if self.training_mode == "online_full":  # change error backprop to spatial error backprop
-                    delta_x = delta + jax.vmap(lambda delta: backward_params["back"] @ delta)(delta)
+
+                B_dfa = backward_params["B_dfa"]
+
+                if B_dfa is not None:
+
+                    delta_params, _, _ = vjp_fun(jax.vmap(lambda delta: B_dfa @ delta)(delta))  # compute params gradient with autodiff
+                    delta_x = delta
+                else:
+                    
+                    delta_params, delta_x, _ = vjp_fun(delta)  # compute params gradient with autodiff
+                    if self.training_mode == "online_full":  # change error backprop to spatial error backprop
+                        delta_x = delta + jax.vmap(lambda delta: backward_params["back"] @ delta)(delta)
                 return delta_params, delta_x, jax.tree_map(jnp.zeros_like, backward_params)
 
             custom_f = nn.custom_vjp(fn=f, forward_fn=forward, backward_fn=backward)
             if not self.is_initializing():
-                backward_params = {"back": self.lru.get_B_norm().real.T}
+                backward_params = {"back": self.lru.get_B_norm().real.T, "B_dfa": self.B_dfa if self.training_mode == "online_dfa" else None}
             else:
                 backward_params = {}
             return custom_f(self.lru, inputs, backward_params)

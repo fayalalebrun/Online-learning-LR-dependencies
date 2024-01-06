@@ -1,7 +1,9 @@
 import jax
 import jax.numpy as jnp
 from flax import linen as nn
-from .layers import SequenceLayer
+from .layers import CustomDense, SequenceLayer
+from .bioflax import RandomDenseLinearDFAOutput
+
 
 
 class StackedEncoder(nn.Module):
@@ -28,6 +30,7 @@ class StackedEncoder(nn.Module):
     d_input: int
     d_model: int
     seq_length: int
+    final_output_dim: int
     activation: str = "gelu"
     readout: int = 0
     dropout: float = 0.0
@@ -39,7 +42,9 @@ class StackedEncoder(nn.Module):
         """
         Initializes a linear encoder and the stack of SequenceLayer.
         """
-        self.encoder = nn.Dense(self.d_model)
+        is_dfa = "dfa" in self.training_mode
+        
+        self.encoder = CustomDense(is_dfa, self.d_model, self.final_output_dim)
         self.layers = [
             SequenceLayer(
                 rec=self.rec,
@@ -50,11 +55,12 @@ class StackedEncoder(nn.Module):
                 training=self.training,
                 training_mode=self.training_mode,
                 prenorm=self.prenorm,
+                final_output_dim=self.final_output_dim,
             )
             for _ in range(self.n_layers)
         ]
         if self.readout > 0:
-            self.mlp = nn.Dense(self.readout)
+            self.mlp = Readout(is_dfa, self.readout)
 
     def __call__(self, x):
         """
@@ -137,6 +143,8 @@ class ClassificationModel(nn.Module):
         """
         Initializes the stacked encoder and a linear decoder.
         """
+        is_dfa = "dfa" in self.training_mode
+        
         self.encoder = StackedEncoder(
             rec=self.rec,
             d_input=self.d_input,
@@ -149,8 +157,9 @@ class ClassificationModel(nn.Module):
             training=self.training,
             training_mode=self.training_mode,
             prenorm=self.prenorm,
+            final_output_dim=self.d_output * self.multidim
         )
-        self.decoder = nn.Dense(self.d_output * self.multidim)
+        self.decoder = Readout(is_dfa, self.d_output * self.multidim)
 
     def decode(self, x, var=None):
         if var is None:
@@ -296,3 +305,15 @@ class RetrievalDecoder(nn.Module):
         x = self.layer1(x)
         x = nn.gelu(x)
         return self.layer2(x)
+
+class Readout(nn.Module):
+    is_dfa: bool
+    dim: int
+    def setup(self):
+        self.dfa = RandomDenseLinearDFAOutput(features=self.dim)
+        self.dense = nn.Dense(self.dim)
+    def __call__(self, x):
+        if self.is_dfa:
+            return self.dfa(x)
+        else:
+            return self.dense(x)

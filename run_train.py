@@ -3,6 +3,7 @@ from online_lru.utils.util import str2bool
 from online_lru.train import train
 from online_lru.dataloading import Datasets
 import os
+import jax
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -13,7 +14,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--wandb_entity",
         type=str,
-        default="ethz_joao",
+        default="fayalalebrun",
         help="wandb entity name, e.g. username",
     )
     parser.add_argument(
@@ -32,7 +33,7 @@ if __name__ == "__main__":
         "--dataset",
         type=str,
         choices=Datasets.keys(),
-        default="mnist-classification",
+        default="zeroes-classification",
         help="dataset name",
     )
     parser.add_argument(
@@ -57,15 +58,15 @@ if __name__ == "__main__":
         choices=["LRU", "RNN", "GRU"],
         help="What layer to use inside each block",
     )
-    parser.add_argument("--n_layers", type=int, default=6, help="Number of layers in the network")
+    parser.add_argument("--n_layers", type=int, default=1, help="Number of layers in the network")
     parser.add_argument(
         "--d_model",
         type=int,
-        default=128,
+        default=50,
         help="Number of features, i.e. H, " "dimension of layer inputs/outputs",
     )
     parser.add_argument(
-        "--d_hidden", type=int, default=256, help="Latent size of recurent unit, called H before"
+        "--d_hidden", type=int, default=50, help="Latent size of recurent unit, called H before"
     )
     parser.add_argument(
         "--mode",
@@ -80,7 +81,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--activation_fn",
-        default="full_glu",
+        default="gelu",
         type=str,
         choices=["full_glu", "half_glu1", "half_glu2", "gelu", "none"],
     )
@@ -111,16 +112,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--training_mode",
         type=str,
-        default="bptt",
+        default="online_full",
         choices=[
             "bptt",
             "online_full",
-            "online_full_rec",
-            "online_full_rec_simpleB",
-            "online_spatial",
-            "online_1truncated",
-            "online_snap1",
-            "online_reservoir",
+            "online_dfa"
         ],
         help="training mode",
     )
@@ -129,7 +125,7 @@ if __name__ == "__main__":
     parser.add_argument("--r_max", type=float, default=1.0, help="r_max for LRU")
 
     # Optimization Parameters
-    parser.add_argument("--bsz", type=int, default=64, help="batch size")
+    parser.add_argument("--bsz", type=int, default=1, help="batch size")
     parser.add_argument(
         "--n_accumulation_steps",
         type=int,
@@ -219,6 +215,7 @@ if __name__ == "__main__":
     )
 
     # os.environ["CUDA_VISIBLE_DEVICES"] = parser.parse_args().gpu
-    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
-    os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".95"
+    #os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
+    #os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".95"
+    # with jax.disable_jit():
     train(parser.parse_args())

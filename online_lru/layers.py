@@ -1,5 +1,6 @@
 from flax import linen as nn
 import jax
+from .bioflax import RandomDenseLinearDFAHidden
 
 
 class SequenceLayer(nn.Module):
@@ -24,6 +25,7 @@ class SequenceLayer(nn.Module):
     dropout: float
     d_model: int
     seq_length: int
+    final_output_dim: int
     activation: str = "gelu"
     training: bool = True
     training_mode: str = "bptt"
@@ -32,12 +34,13 @@ class SequenceLayer(nn.Module):
     def setup(self):
         """Initializes the rec, layer norm and dropout"""
         self.seq = self.rec()
+        self.is_dfa = "dfa" in self.training_mode
 
         if self.activation in ["full_glu"]:
-            self.out1 = nn.Dense(self.d_model)
-            self.out2 = nn.Dense(self.d_model)
+            self.out1 = CustomDense(self.is_dfa, self.d_model, self.final_output_dim)
+            self.out2 = CustomDense(self.is_dfa, self.d_model, self.final_output_dim)
         elif self.activation in ["half_glu1", "half_glu2"]:
-            self.out2 = nn.Dense(self.d_model)
+            self.out2 = CustomDense(self.is_dfa, self.d_model, self.final_output_dim)
 
         self.norm = nn.LayerNorm()
 
@@ -51,8 +54,8 @@ class SequenceLayer(nn.Module):
         """
         Processing done to the input before calling the recurrent module.
         """
-        if self.prenorm:
-            x = self.norm(x)
+        # if self.prenorm:
+        #     x = self.norm(x)
         return x
 
     def post_seq(self, x):
@@ -79,7 +82,8 @@ class SequenceLayer(nn.Module):
             x = x * jax.nn.sigmoid(out2(x1))
             x = self.drop(x)
         elif self.activation in ["gelu"]:
-            x = self.drop(nn.gelu(x))
+            ""
+            #x = nn.gelu(x) # FIXME this for DFA
         elif self.activation in ["none"]:
             x = x
         else:
@@ -90,15 +94,15 @@ class SequenceLayer(nn.Module):
         """
         Processing done after the skip and main connections have been added together.
         """
-        if not self.prenorm:
-            x = self.norm(x)
+        # if not self.prenorm:
+        #     x = self.norm(x)
         return x
 
     def __call__(self, x):
         inputs = x
         hiddens_pre_seq = self.pre_seq(inputs)
         hiddens_post_seq = self.seq(hiddens_pre_seq)
-        hiddens_post_skip = inputs + self.post_seq(hiddens_post_seq)
+        hiddens_post_skip = self.post_seq(hiddens_post_seq) # + inputs FIXME
         return self.post_skip(hiddens_post_skip)
 
     def update_gradients(self, grad):
@@ -109,3 +113,19 @@ class SequenceLayer(nn.Module):
 
         grad["seq"] = self.seq.update_gradients(grad["seq"])
         return grad
+
+class CustomDense(nn.Module):
+    is_dfa: bool
+    d_model: int
+    final_output_dim:  int
+    def setup(self):
+        self.dfa = RandomDenseLinearDFAHidden(features=self.d_model, final_output_dim=self.final_output_dim)
+        self.dense = nn.Dense(self.d_model)
+    def __call__(self, x):
+        if self.is_dfa:
+            assert(self.final_output_dim>0)
+            return self.dfa(x)
+        else:
+            return self.dense(x)
+        
+

@@ -77,7 +77,7 @@ class Zeroes(SequenceDataset):
     d_input = 1
     d_output = 2
     l_output = 0
-    L = 10
+    L = 100
     
     @property
     def init_defaults(self):

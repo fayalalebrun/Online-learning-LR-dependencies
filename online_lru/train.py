@@ -1,5 +1,5 @@
 from functools import partial
-from jax import random
+from jax import random, tree_structure
 import wandb
 from .train_helpers import (
     create_train_state,
@@ -103,6 +103,7 @@ def train(args):
     rec_train = init_layer(
         layer_cls=args.layer_cls,
         lru_cls=LRU(dim=args.d_model),
+        final_output_dims=n_classes*(1 + (args.dataset == "copy-pad-classification")),
         training_mode=args.training_mode,
         **additional_arguments,
     )
@@ -110,6 +111,7 @@ def train(args):
     rec_val = init_layer(
         layer_cls=args.layer_cls,
         lru_cls=LRU(dim=args.d_model),
+        final_output_dims=n_classes*(1 + (args.dataset == "copy-pad-classification")),
         training_mode="bptt",  # bptt mode so rec does not keep in memory states and traces
         **additional_arguments,
     )
@@ -137,6 +139,7 @@ def train(args):
     # initialize training state (optax) and internal states of the model
     state, init_states = create_train_state(
         model,
+        bptt_model,
         init_rng,
         retrieval,
         in_dim=in_dim,
