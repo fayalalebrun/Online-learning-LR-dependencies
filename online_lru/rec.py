@@ -48,8 +48,10 @@ class LRUOnline(nn.Module):
 
     def setup(self):
         self.lru = self.lru_cls
-        self.B_dfa = self.param("B_dfa", nn.initializers.lecun_normal(),
-                       (self.lru.dim, self.final_output_dims))
+
+        # FIXME
+        self.B_dfa = nn.initializers.lecun_normal()(jax.random.PRNGKey(42),
+                                                    (self.lru.dim, self.final_output_dims))
 
     def __call__(self, inputs):
         assert self.training_mode in ["bptt", "online_full", "online_dfa"]
@@ -72,7 +74,6 @@ class LRUOnline(nn.Module):
                 B_dfa = backward_params["B_dfa"]
 
                 if B_dfa is not None:
-
                     delta_params, _, _ = vjp_fun(jax.vmap(lambda delta: B_dfa @ delta)(delta))  # compute params gradient with autodiff
                     delta_x = delta
                 else:
@@ -80,6 +81,7 @@ class LRUOnline(nn.Module):
                     delta_params, delta_x, _ = vjp_fun(delta)  # compute params gradient with autodiff
                     if self.training_mode == "online_full":  # change error backprop to spatial error backprop
                         delta_x = delta + jax.vmap(lambda delta: backward_params["back"] @ delta)(delta)
+                
                 return delta_params, delta_x, jax.tree_map(jnp.zeros_like, backward_params)
 
             custom_f = nn.custom_vjp(fn=f, forward_fn=forward, backward_fn=backward)

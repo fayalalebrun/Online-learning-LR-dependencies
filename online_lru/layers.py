@@ -42,7 +42,7 @@ class SequenceLayer(nn.Module):
         elif self.activation in ["half_glu1", "half_glu2"]:
             self.out2 = CustomDense(self.is_dfa, self.d_model, self.final_output_dim)
 
-        self.norm = nn.LayerNorm()
+        self.norm = DFAPassthrough(passthrough=self.is_dfa, module=nn.LayerNorm())
 
         self.drop = nn.Dropout(
             self.dropout,
@@ -54,8 +54,8 @@ class SequenceLayer(nn.Module):
         """
         Processing done to the input before calling the recurrent module.
         """
-        # if self.prenorm:
-        #     x = self.norm(x)
+        if self.prenorm:
+            x = self.norm(x)
         return x
 
     def post_seq(self, x):
@@ -94,8 +94,8 @@ class SequenceLayer(nn.Module):
         """
         Processing done after the skip and main connections have been added together.
         """
-        # if not self.prenorm:
-        #     x = self.norm(x)
+        if not self.prenorm:
+            x = self.norm(x)
         return x
 
     def __call__(self, x):
@@ -129,3 +129,23 @@ class CustomDense(nn.Module):
             return self.dense(x)
         
 
+class DFAPassthrough(nn.Module):
+    passthrough: bool
+    module: nn.module
+    @nn.compact
+    def __call__(self, *args):
+
+        def f(module, *args):
+            return module(*args)
+        def fwd(module: nn.module, *args):
+            primals, _ = nn.vjp(f, module, *args)
+            _, variables = module.unbind()
+            variables = jax.tree_map(lambda x: jax.numpy.zeros_like(x), variables)
+            return primals, variables
+        def bwd(variables, delta):
+            return (variables, delta)
+        if self.passthrough:
+            custom_f = nn.custom_vjp(fn=f, forward_fn=fwd, backward_fn=bwd)
+            return custom_f(self.module, *args)
+        else:
+            return self.module(*args)
