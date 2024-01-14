@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from flax import linen as nn
 from .layers import CustomDense, SequenceLayer
-from .bioflax import RandomDenseLinearDFAOutput
+from .bioflax import RandomDenseLinearFA
 
 
 
@@ -310,7 +310,7 @@ class Readout(nn.Module):
     is_dfa: bool
     dim: int
     def setup(self):
-        self.dfa = RandomDenseLinearDFAOutput(features=self.dim)
+        self.dfa = RandomDenseLinearFA(features=self.dim)
         self.dense = nn.Dense(self.dim)
     def __call__(self, x):
         if self.is_dfa:

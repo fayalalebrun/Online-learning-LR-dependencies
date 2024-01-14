@@ -1,6 +1,6 @@
 from flax import linen as nn
 import jax
-from .bioflax import RandomDenseLinearDFAHidden
+from .bioflax import RandomDenseLinearFA
 
 
 class SequenceLayer(nn.Module):
@@ -42,7 +42,7 @@ class SequenceLayer(nn.Module):
         elif self.activation in ["half_glu1", "half_glu2"]:
             self.out2 = CustomDense(self.is_dfa, self.d_model, self.final_output_dim)
 
-        self.norm = DFAPassthrough(passthrough=self.is_dfa, module=nn.LayerNorm())
+        self.norm = nn.LayerNorm()
 
         self.drop = nn.Dropout(
             self.dropout,
@@ -119,7 +119,7 @@ class CustomDense(nn.Module):
     d_model: int
     final_output_dim:  int
     def setup(self):
-        self.dfa = RandomDenseLinearDFAHidden(features=self.d_model, final_output_dim=self.final_output_dim)
+        self.dfa = RandomDenseLinearFA(features=self.d_model)
         self.dense = nn.Dense(self.d_model)
     def __call__(self, x):
         if self.is_dfa:
